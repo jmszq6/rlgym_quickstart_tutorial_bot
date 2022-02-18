@@ -8,12 +8,14 @@ from stable_baselines3.ppo import MlpPolicy
 
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.state_setters import DefaultState
-from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition
+from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, NoTouchTimeoutCondition, GoalScoredCondition
 from rlgym_tools.sb3_utils import SB3MultipleInstanceEnv
 from rlgym.utils.reward_functions.common_rewards.misc_rewards import EventReward
 from rlgym.utils.reward_functions.common_rewards.player_ball_rewards import VelocityPlayerToBallReward
 from rlgym.utils.reward_functions.common_rewards.ball_goal_rewards import VelocityBallToGoalReward
 from rlgym.utils.reward_functions import CombinedReward
+
+import atexit
 
 
 if __name__ == '__main__':  # Required for multiprocessing
@@ -27,6 +29,9 @@ if __name__ == '__main__':  # Required for multiprocessing
     target_steps = 100_000
     steps = target_steps // (num_instances * agents_per_match)
     batch_size = steps
+
+    def exit_save(model):
+        model.save("models/exit_save")
 
     def get_match():  # Need to use a function so that each instance can call it and produce their own objects
         return Match(
@@ -46,7 +51,7 @@ if __name__ == '__main__':  # Required for multiprocessing
             ),
             (0.1, 1.0, 1.0)),
             self_play=True,
-            terminal_conditions=[TimeoutCondition(round(fps * 30)), GoalScoredCondition()],  # Some basic terminals
+            terminal_conditions=[TimeoutCondition(fps * 300), NoTouchTimeoutCondition(fps * 20), GoalScoredCondition()],
             obs_builder=AdvancedObs(),  # Not that advanced, good default
             state_setter=DefaultState(),  # Resets to kickoff position
             action_parser=DiscreteAction()  # Discrete > Continuous don't @ me
@@ -90,11 +95,11 @@ if __name__ == '__main__':  # Required for multiprocessing
     # Divide by num_envs (number of agents) because callback only increments every time all agents have taken a step
     # This saves to specified folder with a specified name
     callback = CheckpointCallback(round(5_000_000 / env.num_envs), save_path="models", name_prefix="rl_model")
-
-    while True:
-        try:
+    atexit.register(exit_save, model)
+    try:
+        while True:
             model.learn(25_000_000, callback=callback)
             model.save("models/exit_save")
             model.save(f"mmr_models/{model.num_timesteps}")
-        except:
-            model.save("models/exit_save")
+    except Exception as e:
+        print(e)
